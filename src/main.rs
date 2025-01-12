@@ -501,7 +501,7 @@ fn generate_first_polynomial(
     let mut r1 = Integer::new();
     let mut r2 = Integer::new();
     let mut res = Integer::new();
-    let mut value = Integer::new();
+    let mut value = 0;
 
     factor_base.iter()
         .for_each(|p| {
@@ -510,14 +510,14 @@ fn generate_first_polynomial(
             return;
         }
         let ainv = modinv(&a, *p);
-        let ainv2 = 2 * ainv;
+        let ainv2 = ((2 * ainv).rem_euclid(*p)) as u64;
 
         // store bainv
         
         for j in 0..s {
-            value.assign(&b_list[j]);
-            value *= ainv2;
-            bainv[*p as usize][j] = value.mod_u(*p as u32);
+            value = b_list[j].mod_u(*p as u32) as u64;
+            value = (value * ainv2) % (*p as u64);
+            bainv[*p as usize][j] = value as u32;
         }
 
         // store roots
