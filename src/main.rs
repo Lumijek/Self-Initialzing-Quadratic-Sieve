@@ -499,18 +499,20 @@ fn generate_first_polynomial(
 
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
     let c = (&b * &b - n).complete() / &a;
-    let mut bainv: DashMap<u32, Vec<u32>> = FxHashMap::new();
-    let mut soln_map: DashMap<u32, (u32, u32)> = FxHashMap::new();
-    bainv.reserve(factor_base.len());
-    bainv.reserve(factor_base.len());
+    let mut bainv: DashMap<u32, Vec<u32>> = DashMap::with_capacity(factor_base.len());
+    let mut soln_map: DashMap<u32, (u32, u32)> = DashMap::with_capacity(factor_base.len());
+    //bainv.try_reserve(factor_base.len());
+    //soln_map.try_reserve(factor_base.len());
 
     let mut r1 = Integer::new();
     let mut r2 = Integer::new();
-    let mut res = Integer::new();
-    for p in factor_base.iter() {
+    //let mut res = Integer::new();
+    factor_base.par_iter()
+        .for_each(|p| {
+        let mut res = Integer::new();
         res.assign(&a % *p);
         if res == 0 || *p < 3 {
-            continue;
+            return;
         }
         let ainv = modinv(&a, *p);
 
@@ -529,12 +531,14 @@ fn generate_first_polynomial(
         // store roots
 
         let (r1_val, r2_val) = qs_state.root_map.get(&(*p as u32)).unwrap();
+        let mut r1 = Integer::new();
+        let mut r2 = Integer::new();
         r1.assign(r1_val - &b);
         r2.assign(r2_val - &b);
         r1 *= &ainv;
         r2 *= &ainv;
         soln_map.insert(*p as u32, (r1.mod_u(*p as u32), r2.mod_u(*p as u32)));
-    }
+    });
     PolyState {
         a,
         b,
