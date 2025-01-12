@@ -8,8 +8,6 @@ use std::cmp;
 use std::io::{stdout, Write};
 use std::process;
 use std::time::Instant;
-use rayon::prelude::*;
-use dashmap::DashMap;
 
 static LOWER_BOUND_SIQS: i32 = 2000;
 static UPPER_BOUND_SIQS: i32 = 4000;
@@ -39,8 +37,8 @@ struct PolyState {
     b: Integer,
     c: Integer,
     b_list: Vec<Integer>,
-    bainv: DashMap<u32, Vec<u32>>,
-    soln_map: DashMap<u32, (u32, u32)>,
+    bainv: FxHashMap<u32, Vec<u32>>,
+    soln_map: FxHashMap<u32, (u32, u32)>,
     s: u32,
     afact: FxHashSet<u32>,
 }
@@ -499,20 +497,18 @@ fn generate_first_polynomial(
 
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
     let c = (&b * &b - n).complete() / &a;
-    let mut bainv: DashMap<u32, Vec<u32>> = DashMap::with_capacity(factor_base.len());
-    let mut soln_map: DashMap<u32, (u32, u32)> = DashMap::with_capacity(factor_base.len());
-    //bainv.try_reserve(factor_base.len());
-    //soln_map.try_reserve(factor_base.len());
+    let mut bainv: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+    let mut soln_map: FxHashMap<u32, (u32, u32)> = FxHashMap::default();
+    bainv.reserve(factor_base.len());
+    soln_map.reserve(factor_base.len());
 
     let mut r1 = Integer::new();
     let mut r2 = Integer::new();
-    //let mut res = Integer::new();
-    factor_base.par_iter()
-        .for_each(|p| {
-        let mut res = Integer::new();
+    let mut res = Integer::new();
+    for p in factor_base {
         res.assign(&a % *p);
         if res == 0 || *p < 3 {
-            return;
+            continue;
         }
         let ainv = modinv(&a, *p);
 
@@ -531,14 +527,12 @@ fn generate_first_polynomial(
         // store roots
 
         let (r1_val, r2_val) = qs_state.root_map.get(&(*p as u32)).unwrap();
-        let mut r1 = Integer::new();
-        let mut r2 = Integer::new();
         r1.assign(r1_val - &b);
         r2.assign(r2_val - &b);
         r1 *= &ainv;
         r2 *= &ainv;
         soln_map.insert(*p as u32, (r1.mod_u(*p as u32), r2.mod_u(*p as u32)));
-    });
+    }
     PolyState {
         a,
         b,
@@ -603,8 +597,8 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
         b: Integer::new(),
         c: Integer::new(),
         b_list: Vec::new(),
-        bainv: DashMap::new(),
-        soln_map: DashMap::new(),
+        bainv: FxHashMap::default(),
+        soln_map: FxHashMap::default(),
         s: 0,
         afact: FxHashSet::default(),
     };
