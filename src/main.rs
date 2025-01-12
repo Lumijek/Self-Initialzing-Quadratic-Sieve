@@ -37,8 +37,6 @@ struct PolyState {
     b: Integer,
     c: Integer,
     b_list: Vec<Integer>,
-    bainv: FxHashMap<u32, Vec<u32>>,
-    soln_map: FxHashMap<u32, (u32, u32)>,
     s: u32,
     afact: FxHashSet<u32>,
 }
@@ -477,6 +475,8 @@ fn generate_first_polynomial(
     qs_state: &mut QsState,
     n: &Integer,
     m: u32,
+    bainv: &mut Vec<Vec<u32>>,
+    soln_map: &mut [(u32, u32)],
     factor_base: &Vec<i32>,
     poly_a_list: &mut Vec<Integer>,
 ) -> PolyState {
@@ -497,32 +497,28 @@ fn generate_first_polynomial(
 
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
     let c = (&b * &b - n).complete() / &a;
-    let mut bainv: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
-    let mut soln_map: FxHashMap<u32, (u32, u32)> = FxHashMap::default();
-    bainv.reserve(factor_base.len());
-    soln_map.reserve(factor_base.len());
 
     let mut r1 = Integer::new();
     let mut r2 = Integer::new();
     let mut res = Integer::new();
-    for p in factor_base {
+    let mut value = Integer::new();
+
+    factor_base.iter()
+        .for_each(|p| {
         res.assign(&a % *p);
         if res == 0 || *p < 3 {
-            continue;
+            return;
         }
         let ainv = modinv(&a, *p);
         let ainv2 = 2 * ainv;
 
         // store bainv
-        let mut vector = vec![0; s];
-
-        let mut value = Integer::new();
+        
         for j in 0..s {
             value.assign(&b_list[j]);
             value *= ainv2;
-            vector[j] = value.mod_u(*p as u32);
+            bainv[*p as usize][j] = value.mod_u(*p as u32);
         }
-        bainv.insert(*p as u32, vector);
 
         // store roots
 
@@ -531,15 +527,15 @@ fn generate_first_polynomial(
         r2.assign(r2_val - &b);
         r1 *= &ainv;
         r2 *= &ainv;
-        soln_map.insert(*p as u32, (r1.mod_u(*p as u32), r2.mod_u(*p as u32)));
-    }
+        soln_map[*p as usize].0 = r1.mod_u(*p as u32);
+        soln_map[*p as usize].1 = r2.mod_u(*p as u32)
+    });
+
     PolyState {
         a,
         b,
         c,
         b_list,
-        bainv,
-        soln_map,
         s: s as u32,
         afact,
     }
@@ -597,12 +593,15 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
         b: Integer::new(),
         c: Integer::new(),
         b_list: Vec::new(),
-        bainv: FxHashMap::default(),
-        soln_map: FxHashMap::default(),
         s: 0,
         afact: FxHashSet::default(),
     };
     let mut end = 0;
+
+    let mut bainv: Vec<Vec<u32>> = vec![vec![0; 30]; (b + 1) as usize];
+    let mut soln_map: Vec<(u32, u32)> = vec![(0, 0); (b + 1) as usize];
+
+
     while relations.len() < target_relations {
         if num_poly % 10000 == 0 {
             print_stats(&relations, target_relations, num_poly, start, ft);
@@ -611,7 +610,7 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
 
         // Poly Stuff
         if poly_ind == 0 {
-            poly_state = generate_first_polynomial(qs_state, &n, m, &factor_base, &mut poly_a_list);
+            poly_state = generate_first_polynomial(qs_state, &n, m, &mut bainv, &mut soln_map, &factor_base, &mut poly_a_list);
             end = 1 << (poly_state.s - 1);
             poly_ind += 1;
             let cur_fb: Vec<i32> = factor_base

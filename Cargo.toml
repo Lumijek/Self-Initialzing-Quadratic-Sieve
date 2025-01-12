@@ -9,5 +9,4 @@ rug = "1.26.1"
 rand = "*"
 rustc-hash = "2.1.0"
 mimalloc = "*"
-rayon = "1.10"
-dashmap = "6.1.0"
+
