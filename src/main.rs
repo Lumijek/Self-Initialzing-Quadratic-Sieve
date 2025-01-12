@@ -356,7 +356,7 @@ fn generate_a(
     n: &Integer,
     m: u32,
     factor_base: &[i32],
-    poly_a_list: &mut Vec<Integer>,
+    poly_a_list: &mut FxHashSet<Integer>,
 ) -> (Integer, Vec<usize>, FxHashSet<u32>) {
     let mut rng = rand::thread_rng();
     let mut lower_polypool_index: isize = 2;
@@ -466,7 +466,7 @@ fn generate_a(
             }
         }
     }
-    poly_a_list.push(poly_a.clone());
+    poly_a_list.insert(poly_a.clone());
     qli.sort();
     (poly_a, qli, afact)
 }
@@ -478,7 +478,7 @@ fn generate_first_polynomial(
     bainv: &mut Vec<Vec<u32>>,
     soln_map: &mut [(u32, u32)],
     factor_base: &Vec<i32>,
-    poly_a_list: &mut Vec<Integer>,
+    poly_a_list: &mut FxHashSet<Integer>,
 ) -> PolyState {
     let (a, qli, afact) = generate_a(n, m, factor_base, poly_a_list);
     let s = qli.len();
@@ -546,7 +546,7 @@ fn generate_first_polynomial(
         // r2
         let r2_modp = r2_val % (*p as u32);
         let diff_u64 = if r2_modp >= b_modp {
-            r1_modp - b_modp
+            r2_modp - b_modp
         } else {
             (*p as u32) - (b_modp - r2_modp)
         } as u64;
@@ -602,7 +602,7 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
     let mut num_poly = 0;
     let interval_size = 2 * m + 1;
     let grays = get_gray_code(20);
-    let mut poly_a_list: Vec<Integer> = Vec::new();
+    let mut poly_a_list: FxHashSet<Integer> = FxHashSet::default();
     let mut poly_ind = 0;
 
     let mut sieve_values = vec![0; interval_size as usize];
@@ -623,7 +623,6 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
 
     let mut bainv: Vec<Vec<u32>> = vec![vec![0; 30]; (b + 1) as usize];
     let mut soln_map: Vec<(u32, u32)> = vec![(0, 0); (b + 1) as usize];
-
 
     while relations.len() < target_relations {
         if num_poly % 10000 == 0 {
