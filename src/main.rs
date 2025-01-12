@@ -2,12 +2,12 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use rand::{self, Rng};
-use rug::{Complete, Float, Integer};
+use rug::{Assign, Complete, Float, Integer};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp;
+use std::io::{stdout, Write};
 use std::process;
 use std::time::Instant;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::io::{stdout, Write};
 
 static LOWER_BOUND_SIQS: i32 = 2000;
 static UPPER_BOUND_SIQS: i32 = 4000;
@@ -54,9 +54,9 @@ const MULT_LIST: [u32; 114] = [
 
 fn get_gray_code(n: usize) -> Vec<(usize, i32)> {
     let size = 1 << (n - 1);
-    let mut gray = vec![(0, 0); size];
-    gray[0] = (0, 0);
-    for i in 1..size {
+    let mut grays = vec![(0, 0); size];
+    grays[0] = (0, 0);
+    for (i, gray) in grays.iter_mut().enumerate().take(size).skip(1) {
         let mut v = 1;
         let mut j = i;
         while (j & 1) == 0 {
@@ -66,12 +66,12 @@ fn get_gray_code(n: usize) -> Vec<(usize, i32)> {
         let mut tmp = i + ((1 << v) - 1);
         tmp >>= v;
         if (tmp & 1) == 1 {
-            gray[i] = (v - 1, -1);
+            *gray = (v - 1, -1);
         } else {
-            gray[i] = (v - 1, 1);
+            *gray = (v - 1, 1);
         }
     }
-    gray
+    grays
 }
 
 pub fn print_stats(
@@ -210,9 +210,7 @@ fn choose_multiplier(n: &Integer, b: u32, multiplier: &mut u32) -> Vec<u32> {
         num_multipliers += 1;
     }
 
-    for i in 1..num_primes {
-        let prime = prime_list[i];
-
+    for &prime in prime_list.iter().take(num_primes).skip(1) {
         let contrib = (prime as f64).ln() / ((prime as f64) - 1.0);
 
         let modp = n.mod_u(prime);
@@ -340,9 +338,9 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
     factor_base
 }
 
-fn modinv(mut n: Integer, mut p: i32) -> i32 {
-    n %= p;
-    let mut n = n.to_i32().unwrap();
+fn modinv(n: &Integer, mut p: i32) -> i32 {
+    let n = n % p;
+    let mut n = n.complete().to_i32().unwrap();
     let mut x = 0;
     let mut u = 1;
     while n != 0 {
@@ -366,12 +364,12 @@ fn generate_a(
     let mut lower_polypool_index: isize = 2;
     let mut upper_polypool_index: isize = (SMALL_B as isize) - 1;
     let mut poly_low_found = false;
-    for i in 0usize..(SMALL_B as usize) {
-        if factor_base[i] > LOWER_BOUND_SIQS && !poly_low_found {
+    for (i, fb_prime) in factor_base.iter().enumerate().take(SMALL_B as usize) {
+        if *fb_prime > LOWER_BOUND_SIQS && !poly_low_found {
             lower_polypool_index = i as isize;
             poly_low_found = true;
         }
-        if factor_base[i] > UPPER_BOUND_SIQS {
+        if *fb_prime > UPPER_BOUND_SIQS {
             upper_polypool_index = i as isize;
             break;
         }
@@ -399,7 +397,7 @@ fn generate_a(
             let mut randindex: usize = 1;
             while !found_a_factor {
                 randindex = rng.gen_range(lower_polypool_index..upper_polypool_index) as usize;
-                potential_a_factor = factor_base[randindex as usize] as u32;
+                potential_a_factor = factor_base[randindex] as u32;
                 found_a_factor = true;
                 if afact.contains(&potential_a_factor) {
                     found_a_factor = false;
@@ -428,9 +426,9 @@ fn generate_a(
         let mut mindiff = Integer::from(u64::MAX);
         let mut randindex = 0;
 
-        for i in 0usize..(SMALL_B as usize) {
-            if (&a1 - factor_base[i]).complete().abs() < mindiff {
-                mindiff = (&a1 - factor_base[i]).complete().abs();
+        for (i, fb_prime) in factor_base.iter().enumerate().take(SMALL_B as usize) {
+            if (&a1 - fb_prime).complete().abs() < mindiff {
+                mindiff = (&a1 - fb_prime).complete().abs();
                 randindex = i;
             }
         }
@@ -489,7 +487,7 @@ fn generate_first_polynomial(
         let p = factor_base[qli[l]] as u32;
         let r1 = qs_state.root_map[&p].0 as i32;
         let aq = (&a / p).complete();
-        let invaq = modinv(aq.clone(), p as i32);
+        let invaq = modinv(&aq, p as i32);
         let mut gamma = (r1 * invaq).rem_euclid(p as i32) as u32; // if code doesn't work, ensure overflow isn't happening here
         if gamma > p / 2 {
             gamma = p - gamma;
@@ -501,34 +499,39 @@ fn generate_first_polynomial(
     let c = (&b * &b - n).complete() / &a;
     let mut bainv: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
     let mut soln_map: FxHashMap<u32, (u32, u32)> = FxHashMap::default();
+    bainv.reserve(factor_base.len());
+    bainv.reserve(factor_base.len());
 
+    let mut r1 = Integer::new();
+    let mut r2 = Integer::new();
+    let mut res = Integer::new();
     for p in factor_base {
-        if (&a % *p).complete() == 0 || *p < 3 {
+        res.assign(&a % *p);
+        if res == 0 || *p < 3 {
             continue;
         }
-        let ainv = modinv(a.clone(), *p);
+        let ainv = modinv(&a, *p);
 
         // store bainv
         let mut vector = vec![0; s];
 
-        let mut value: Integer;
+        let mut value = Integer::new();
         for j in 0..s {
-            value = (2u32 * &b_list[j]).complete();
-            value *= &ainv;
+            value.assign(&b_list[j]);
+            value *= 2;
+            value *= ainv;
             vector[j] = value.mod_u(*p as u32);
         }
-
         bainv.insert(*p as u32, vector);
 
         // store roots
 
-        let (r1, r2) = qs_state.root_map.get(&(*p as u32)).unwrap();
-        let mut r1 = (r1 - &b).complete();
-        let mut r2 = (r2 - &b).complete();
+        let (r1_val, r2_val) = qs_state.root_map.get(&(*p as u32)).unwrap();
+        r1.assign(r1_val - &b);
+        r2.assign(r2_val - &b);
         r1 *= &ainv;
         r2 *= &ainv;
         soln_map.insert(*p as u32, (r1.mod_u(*p as u32), r2.mod_u(*p as u32)));
-
     }
     PolyState {
         a,
@@ -664,7 +667,7 @@ fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
 
 fn main() {
     let n = "373784758862055327503642974151754627650123768832847679663987";
-    let n = n.parse::<Integer>().expect("Bad Integer N");
+    let n = n.parse::<Integer>().unwrap();
     let b: u32 = 68000;
     let m: u32 = 270000;
     let t: u32 = 10;
