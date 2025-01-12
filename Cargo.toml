@@ -1,0 +1,11 @@
+[package]
+name = "quadratic-sieve"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gmp-mpfr-sys = { version = "1.6", features=["use-system-libs"] }
+rug = "1.26.1"
+rand = "*"
+rustc-hash = "2.1.0"
+mimalloc = "*"
