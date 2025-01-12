@@ -498,8 +498,6 @@ fn generate_first_polynomial(
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
     let c = (&b * &b - n).complete() / &a;
 
-    let mut r1 = Integer::new();
-    let mut r2 = Integer::new();
     let mut res = Integer::new();
     let mut value = 0;
 
@@ -521,14 +519,39 @@ fn generate_first_polynomial(
         }
 
         // store roots
-
+        
+        /*
         let (r1_val, r2_val) = qs_state.root_map.get(&(*p as u32)).unwrap();
         r1.assign(r1_val - &b);
         r2.assign(r2_val - &b);
         r1 *= &ainv;
         r2 *= &ainv;
         soln_map[*p as usize].0 = r1.mod_u(*p as u32);
-        soln_map[*p as usize].1 = r2.mod_u(*p as u32)
+        soln_map[*p as usize].1 = r2.mod_u(*p as u32);
+        */
+        
+        let (r1_val, r2_val) = qs_state.root_map.get(&(*p as u32)).unwrap();
+
+        // r1
+        let r1_modp = r1_val % (*p as u32);
+        let b_modp = b.mod_u(*p as u32);
+        let diff_u64 = if r1_modp >= b_modp {
+            r1_modp - b_modp
+        } else {
+            (*p as u32) - (b_modp - r1_modp)
+        } as u64;
+        let ainv_modp = (ainv.rem_euclid(*p)) as u64;
+        let value = (diff_u64 * ainv_modp) %  (*p as u64);
+
+        // r2
+        let r2_modp = r2_val % (*p as u32);
+        let diff_u64 = if r2_modp >= b_modp {
+            r1_modp - b_modp
+        } else {
+            (*p as u32) - (b_modp - r2_modp)
+        } as u64;
+        let value = (diff_u64 * ainv_modp) %  (*p as u64);
+        
     });
 
     PolyState {
