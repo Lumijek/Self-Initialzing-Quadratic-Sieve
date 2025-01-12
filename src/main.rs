@@ -8,6 +8,8 @@ use std::cmp;
 use std::io::{stdout, Write};
 use std::process;
 use std::time::Instant;
+use rayon::prelude::*;
+use dashmap::DashMap;
 
 static LOWER_BOUND_SIQS: i32 = 2000;
 static UPPER_BOUND_SIQS: i32 = 4000;
@@ -505,7 +507,7 @@ fn generate_first_polynomial(
     let mut r1 = Integer::new();
     let mut r2 = Integer::new();
     let mut res = Integer::new();
-    for p in factor_base {
+    for p in factor_base.iter() {
         res.assign(&a % *p);
         if res == 0 || *p < 3 {
             continue;
