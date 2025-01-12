@@ -624,6 +624,11 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
     let mut bainv: Vec<Vec<u32>> = vec![vec![0; 30]; (b + 1) as usize];
     let mut soln_map: Vec<(u32, u32)> = vec![(0, 0); (b + 1) as usize];
 
+    let filtered_factor_base: Vec<u32> = factor_base
+        .iter()
+        .filter(|&&p| p >= prime_limit && p >= 0)
+        .map(|&p| p as u32)
+        .collect();
     while relations.len() < target_relations {
         if num_poly % 10000 == 0 {
             print_stats(&relations, target_relations, num_poly, start, ft);
