@@ -39,8 +39,8 @@ struct PolyState {
     b: Integer,
     c: Integer,
     b_list: Vec<Integer>,
-    bainv: FxHashMap<u32, Vec<u32>>,
-    soln_map: FxHashMap<u32, (u32, u32)>,
+    bainv: DashMap<u32, Vec<u32>>,
+    soln_map: DashMap<u32, (u32, u32)>,
     s: u32,
     afact: FxHashSet<u32>,
 }
@@ -499,8 +499,8 @@ fn generate_first_polynomial(
 
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
     let c = (&b * &b - n).complete() / &a;
-    let mut bainv: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
-    let mut soln_map: FxHashMap<u32, (u32, u32)> = FxHashMap::default();
+    let mut bainv: DashMap<u32, Vec<u32>> = FxHashMap::new();
+    let mut soln_map: DashMap<u32, (u32, u32)> = FxHashMap::new();
     bainv.reserve(factor_base.len());
     bainv.reserve(factor_base.len());
 
@@ -599,8 +599,8 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
         b: Integer::new(),
         c: Integer::new(),
         b_list: Vec::new(),
-        bainv: FxHashMap::default(),
-        soln_map: FxHashMap::default(),
+        bainv: DashMap::new(),
+        soln_map: DashMap::new(),
         s: 0,
         afact: FxHashSet::default(),
     };
