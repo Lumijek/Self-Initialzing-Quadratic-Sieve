@@ -482,9 +482,9 @@ fn generate_first_polynomial(
 ) -> PolyState {
     let (a, qli, afact) = generate_a(n, m, factor_base, poly_a_list);
     let s = qli.len();
-    let mut b_list: Vec<Integer> = Vec::new();
-    for l in 0..s {
-        let p = factor_base[qli[l]] as u32;
+    let mut b_list: Vec<Integer> = vec![Integer::new(); s];
+    for i in 0..s {
+        let p = factor_base[qli[i]] as u32;
         let r1 = qs_state.root_map[&p].0 as i32;
         let aq = (&a / p).complete();
         let invaq = modinv(&aq, p as i32);
@@ -492,7 +492,7 @@ fn generate_first_polynomial(
         if gamma > p / 2 {
             gamma = p - gamma;
         }
-        b_list.push(aq * gamma);
+        b_list[i] = aq * gamma;
     }
 
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
@@ -511,6 +511,7 @@ fn generate_first_polynomial(
             continue;
         }
         let ainv = modinv(&a, *p);
+        let ainv2 = 2 * ainv;
 
         // store bainv
         let mut vector = vec![0; s];
@@ -518,8 +519,7 @@ fn generate_first_polynomial(
         let mut value = Integer::new();
         for j in 0..s {
             value.assign(&b_list[j]);
-            value *= 2;
-            value *= ainv;
+            value *= ainv2;
             vector[j] = value.mod_u(*p as u32);
         }
         bainv.insert(*p as u32, vector);
