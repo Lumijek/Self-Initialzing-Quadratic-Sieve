@@ -337,8 +337,7 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
 }
 
 fn modinv(n: &Integer, mut p: i32) -> i32 {
-    let n = n % p;
-    let mut n = n.complete().to_i32().unwrap();
+    let mut n = n.mod_u(p as u32) as i32;
     let mut x = 0;
     let mut u = 1;
     while n != 0 {
@@ -626,9 +625,13 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
 
     let filtered_factor_base: Vec<u32> = factor_base
         .iter()
-        .filter(|&&p| p >= prime_limit && p >= 0)
+        .filter(|&&p| p >= qs_state.prime_limit)
         .map(|&p| p as u32)
         .collect();
+
+    let mut pa = Integer::new();
+    let mut cur_fb: Vec<u32> = Vec::new();
+
     while relations.len() < target_relations {
         if num_poly % 10000 == 0 {
             print_stats(&relations, target_relations, num_poly, start, ft);
@@ -637,14 +640,16 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
 
         // Poly Stuff
         if poly_ind == 0 {
+            cur_fb.clear();
             poly_state = generate_first_polynomial(qs_state, &n, m, &mut bainv, &mut soln_map, &factor_base, &mut poly_a_list);
             end = 1 << (poly_state.s - 1);
             poly_ind += 1;
-            let cur_fb: Vec<i32> = factor_base
-                .iter()
-                .filter(|&p| *p >= qs_state.prime_limit && (&poly_state.a % p).complete() != 0)
-                .copied()
-                .collect();
+            for p in &filtered_factor_base {
+                pa.assign(&poly_state.a % p);
+                if !pa.is_zero() {
+                    cur_fb.push(*p);
+                }
+            }
         } else {
             let (v, e) = grays[poly_ind];
             poly_state.b += 2 * e * &poly_state.b_list[v];
