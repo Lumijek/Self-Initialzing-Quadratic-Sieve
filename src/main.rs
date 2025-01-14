@@ -6,14 +6,18 @@ use rug::{Assign, Complete, Float, Integer};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp;
 use std::io::{stdout, Write};
+use std::mem;
 use std::process;
+use std::ptr;
 use std::time::Instant;
+use std::cmp::max;
 
 static LOWER_BOUND_SIQS: i32 = 2000;
 static UPPER_BOUND_SIQS: i32 = 4000;
 static SMALL_B: i32 = 1024;
 static ERROR_MUL: f64 = 0.9;
 const NUM_TEST_PRIMES: i32 = 300;
+const SIEVE_BLOCK_SIZE: u32 = 32768;
 
 fn print_type_of<T>(_: &T) {
     println!("{}", std::any::type_name::<T>());
@@ -537,7 +541,8 @@ fn generate_first_polynomial(
         } else {
             (p_u32) - (b_modp - r1_modp)
         } as u64;
-        let r1 = (diff_u64 * ainv_modp) % (p as u64);
+        let mut r1 = ((diff_u64 * ainv_modp) % (p as u64)) as u32;
+        r1 = (r1 + qs_state.m) % (p as u32);
 
         // r2
         let r2_modp = r2_val % (p_u32);
@@ -546,7 +551,14 @@ fn generate_first_polynomial(
         } else {
             (p_u32) - (b_modp - r2_modp)
         } as u64;
-        let r2 = (diff_u64 * ainv_modp) % (p as u64);
+        let mut r2 = ((diff_u64 * ainv_modp) % (p as u64)) as u32;
+        r2 = (r2 + qs_state.m) % (p as u32);
+
+        if r1 > r2 {
+            let temp = r1;
+            r1 = r2;
+            r2 = temp;
+        }
         soln_map[p as usize].0 = r1 as i32;
         soln_map[p as usize].1 = r2 as i32;
     });
@@ -702,7 +714,7 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
         num_poly += 1;
         (v, e) = grays[poly_ind];
         // Sieving stuff
-
+        
         for &p in &cur_fb {
             let p_ind = p as usize;
             let p_i32 = p as i32;
@@ -712,32 +724,54 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
             let ebainv = e * bainv[p_ind][v];
             soln_map[p_ind].0 = (r1 - ebainv).rem_euclid(p_i32);
             soln_map[p_ind].1 = (r2 - ebainv).rem_euclid(p_i32);
-            let amx = ((r1 as u32) + m) as usize;
-            let bmx = ((r2 as u32) + m) as usize;
+            let mut amx = r1 as usize;
+            let mut bmx = r2 as usize;
 
-            let apx = amx - p as usize;
-            let bpx = bmx - p as usize;
-            let mut k = p_ind;
-
-            while (k as u32) < m {
-                sieve_values[apx + k] += log_p;
-                sieve_values[bpx + k] += log_p;
-                sieve_values[amx - k] += log_p;
-                sieve_values[bmx - k] += log_p;
-                k += p_ind;
+            if amx > bmx {
+                amx = amx + bmx;
+                bmx = amx - bmx;
+                amx = amx - bmx;
+            }
+            while bmx < interval_size {
+                sieve_values[amx] += log_p;
+                sieve_values[bmx] += log_p;
+                amx += p_ind;
+                bmx += p_ind;
+            }
+            if amx < interval_size {
+                sieve_values[amx] += log_p;
             }
         }
         num_poly += 1;
         let mut x: usize = 0;
-        while x < (interval_size - 1) {
-            let slice_8 = &sieve_values[x..x + 16];
+        let mut i = 0;
+        let slice_u64: &[u128] = unsafe {
+            assert!(
+                (sieve_values.as_ptr() as usize) % mem::align_of::<u128>() == 0,
+                "vec_u8 is not properly aligned for u64"
+            );
 
-            let sieve_hits = u128::from_be_bytes(slice_8.try_into().unwrap());
-            if sieve_hits & sieve_mask == 0 {
-                x += 16;
+            std::slice::from_raw_parts(
+                sieve_values.as_ptr() as *const u128,
+                sieve_values.len() / mem::size_of::<u128>(),
+            )
+        };
+        while x < interval_size - 1 {
+            let to_mask = slice_u64[i]
+                | slice_u64[i + 1]
+                | slice_u64[i + 2]
+                | slice_u64[i + 3]
+                | slice_u64[i + 4]
+                | slice_u64[i + 5]
+                | slice_u64[i + 6]
+                | slice_u64[i + 7];
+            if to_mask & sieve_mask == 0 {
+                x += 128;
+                i += 8;
                 continue;
             }
-            for xv in x..(x + 16) {
+            i += 8;
+            for xv in x..(x + 128) {
                 if sieve_values[xv] & 0x80 == 0 {
                     continue;
                 }
@@ -783,7 +817,7 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
                 relations.push(relation.clone());
                 roots.push(pva.clone());
             }
-            x += 16;
+            x += 128;
         }
         sieve_values.fill(bound);
     }
@@ -826,14 +860,14 @@ fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
 }
 
 fn main() {
-    let n = "373784758862055327503642974151754627650123768832847679663987";
+    let n = "3605578192695572467817617873284285677017674222302051846902171336604399";
     let n = n.parse::<Integer>().unwrap();
-    let b: u32 = 56311;
-    let m: u32 = 65536;
+    let b: u32 = 216661;
+    let m: u32 = 196608;
     let t: u32 = 10;
-    let prime_limit: i32 = 45;
-    let eps: u32 = 36;
-    let lp_multiplier: u32 = 50;
+    let prime_limit: i32 = 127;
+    let eps: u32 = 43;
+    let lp_multiplier: u32 = 80;
     let multiplier = 0;
     let mut prime_log_map: Vec<u8> = vec![0; (b + 1) as usize];
     let mut root_map = vec![(0, 0); (b + 1) as usize];
