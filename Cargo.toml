@@ -10,7 +10,6 @@ rand = "*"
 rustc-hash = "2.1.0"
 mimalloc = "*"
 rayon = "*"
-arrayvec = "0.7.6"
 
 [profile.release]
 debug = true
