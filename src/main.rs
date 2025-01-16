@@ -26,6 +26,28 @@ struct QsState {
     multiplier: u32,
     prime_log_map: Vec<u8>,
     root_map: Vec<(u32, u32)>,
+    lp_found: usize,
+    large_prime_bound: u32,
+    matrix: Vec<Integer>,
+    relations: Vec<Integer>,
+    roots: Vec<Integer>,
+    partials: FxHashMap<u64, (Integer, FxHashSet<i32>, Integer)>,
+    ind: Integer,
+    current_factor_base: Vec<u32>,
+    sieve_values: Vec<u8>,
+    bainv: Vec<Vec<i32>>,
+    soln_map: Vec<(i32, i32)>,
+    poly_a_list: FxHashSet<Integer>,
+    filtered_factor_base: Vec<u32>,
+    fb_primes: Vec<FBPrime>,
+    current_fb_primes: Vec<FBPrime>
+}
+
+struct FBPrime {
+    prime: u32,
+    root1: u32,
+    root2: u32,
+    logprime: u8
 }
 
 struct Polynomial {
@@ -345,8 +367,22 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
             factor_base.push(*prime as i32);
             qs_state.prime_log_map[*prime as usize] = prime.ilog2() as u8;
             qs_state.root_map[*prime as usize] = tonelli_shanks(&qs_state.n, prime);
+            if *prime >= qs_state.prime_limit as u32 {
+                let fb_prime = FBPrime {
+                    prime: *prime,
+                    root1: qs_state.root_map[*prime as usize].0,
+                    root2: qs_state.root_map[*prime as usize].1,
+                    logprime: prime.ilog2() as u8
+                };
+                qs_state.fb_primes.push(fb_prime);
+            }
         }
     }
+    qs_state.filtered_factor_base = factor_base
+        .iter()
+        .filter(|&&p| p >= qs_state.prime_limit)
+        .map(|&p| p as u32)
+        .collect();
     println!("Factor base size: {}", factor_base.len());
     factor_base
 }
@@ -369,11 +405,11 @@ fn modinv(n: &Integer, mut p: i32) -> i32 {
 
 #[inline(never)]
 fn generate_a(
-    n: &Integer,
-    m: u32,
+    qs_state: &mut QsState,
     factor_base: &[i32],
-    poly_a_list: &mut FxHashSet<Integer>,
 ) -> (Integer, Vec<usize>, FxHashSet<i32>) {
+
+    let poly_a_list = &mut qs_state.poly_a_list;
     let mut rng = rand::thread_rng();
     let mut lower_polypool_index: isize = 2;
     let mut upper_polypool_index: isize = (SMALL_B as isize) - 1;
@@ -389,7 +425,7 @@ fn generate_a(
         }
     }
 
-    let target_a: Integer = (Float::with_val(53, 2 * n.clone()).sqrt() / m)
+    let target_a: Integer = (Float::with_val(53, 2 * qs_state.n.clone()).sqrt() / qs_state.m)
         .to_integer()
         .unwrap();
     let mut target_bits: u32 = ((target_a.significant_bits() as f64) * ERROR_MUL).round() as u32;
@@ -494,14 +530,11 @@ fn generate_a(
 #[inline(never)]
 fn generate_first_polynomial(
     qs_state: &mut QsState,
-    n: &Integer,
-    m: u32,
-    bainv: &mut [Vec<i32>],
-    soln_map: &mut [(i32, i32)],
     factor_base: &[i32],
-    poly_a_list: &mut FxHashSet<Integer>,
 ) -> PolyState {
-    let (a, qli, afact) = generate_a(n, m, factor_base, poly_a_list);
+    let (a, qli, afact) = generate_a(qs_state, factor_base);
+    let bainv = &mut qs_state.bainv;
+    let soln_map = &mut qs_state.soln_map;
     let s = qli.len();
     let mut b_list: Vec<Integer> = vec![Integer::new(); s];
     for i in 0..s {
@@ -517,7 +550,7 @@ fn generate_first_polynomial(
     }
 
     let b: Integer = b_list.iter().sum::<Integer>().modulo(&a);
-    let c = (&b * &b - n).complete() / &a;
+    let c = (&b * &b - &qs_state.n).complete() / &a;
 
     let mut res = Integer::new();
     let mut value = 0;
@@ -609,29 +642,37 @@ fn factorise_fast(mut value: Integer, factor_base: &[i32]) -> (FxHashSet<i32>, I
 #[inline(never)]
 fn generate_polynomials(
     qs_state: &mut QsState,
-    n: &Integer,
-    m: u32,
-    bainv: &mut [Vec<i32>],
-    soln_map: &mut [(i32, i32)],
-    factor_base: &[i32],
-    poly_a_list: &mut FxHashSet<Integer>,
-    filtered_factor_base: &Vec<u32>,
-    current_factor_base: &mut Vec<u32>,
     polynomials: &mut Vec<Polynomial>,
+    factor_base: &[i32],
     grays: &[(usize, i32)],
 ) -> PolyState {
     let mut pa = Integer::new();
-    current_factor_base.clear();
+    qs_state.current_factor_base.clear();
+    qs_state.current_fb_primes.clear();
     polynomials.clear();
     let poly_state =
-        generate_first_polynomial(qs_state, n, m, bainv, soln_map, factor_base, poly_a_list);
+        generate_first_polynomial(qs_state, factor_base);
     let end = 1 << (poly_state.s - 1);
-    for p in filtered_factor_base {
+    for p in &qs_state.filtered_factor_base {
         pa.assign(&poly_state.a % p);
         if !pa.is_zero() {
-            current_factor_base.push(*p);
+            qs_state.current_factor_base.push(*p);
         }
     }
+
+    for fb_prime in &qs_state.current_fb_primes {
+        pa.assign(&poly_state.a % fb_prime.prime);
+        if !pa.is_zero() {
+            let fbp = FBPrime {
+                prime: fb_prime.prime,
+                root1: fb_prime.root1,
+                root2: fb_prime.root2,
+                logprime: fb_prime.logprime
+            };
+            qs_state.fb_primes.push(fbp);
+        }
+    }
+
     let (v, e) = grays[1];
     let base_poly = Polynomial {
         a: poly_state.a.clone(),
@@ -653,7 +694,7 @@ fn generate_polynomials(
         };
         let (v, e) = grays[i];
         poly_curr.b += 2 * e * &poly_state.b_list[v];
-        poly_curr.c = (&poly_curr.b * &poly_curr.b - n).complete() / &poly_curr.a;
+        poly_curr.c = (&poly_curr.b * &poly_curr.b - &qs_state.n).complete() / &poly_curr.a;
         polynomials.push(poly_curr);
     }
     poly_state
@@ -661,27 +702,19 @@ fn generate_polynomials(
 
 #[inline(never)]
 fn find_relations(
-    qs_state: &QsState,
+    qs_state: &mut QsState,
     factor_base: &FxHashMap<i32, usize>,
-    sieve_values: &[u8],
     interval_size: usize,
     poly_state: &PolyState,
     ppoly: &Polynomial,
     factor_base_list: &[i32],
-    partials: &mut FxHashMap<u64, (Integer, FxHashSet<i32>, Integer)>,
-    relations: &mut Vec<Integer>,
-    roots: &mut Vec<Integer>,
-    matrix: &mut [Integer],
-    ind: &mut Integer,
-    large_prime_bound: u64,
-    lp_found: &mut usize,
-    axval: &mut Integer,
-    relation: &mut Integer,
-    poly_val: &mut Integer,
-    pva: &mut Integer,
-    finval: &mut Integer,
-    m: &u32,
 ) {
+
+    let sieve_values = &qs_state.sieve_values;
+    let mut axval = Integer::new();
+    let mut relation = Integer::new();
+    let mut poly_val = Integer::new();
+    let mut pva = Integer::new();
     let mut x: usize = 0;
     let mut i = 0;
     let slice_u128: &[u128] = unsafe {
@@ -725,39 +758,38 @@ fn find_relations(
                 continue;
             }
 
-            let xval = (xv as i32) - (*m as i32);
+            let xval = (xv as i32) - (qs_state.m as i32);
 
             // Compute ax + b
             axval.assign(&ppoly.a * xval);
-            relation.assign(&*axval + &ppoly.b);
+            relation.assign(&axval + &ppoly.b);
 
             // Compute the polynomial value
             poly_val.assign(2 * &ppoly.b);
-            *poly_val += &*axval;
-            *poly_val *= xval;
-            *poly_val += &ppoly.c;
+            poly_val += &axval;
+            poly_val *= xval;
+            poly_val += &ppoly.c;
 
             // Compute pva
-            pva.assign(&*poly_val);
-            *pva *= &ppoly.a;
+            pva.assign(&poly_val);
+            pva *= &ppoly.a;
 
             // Factorize the polynomial value
-            let (mut local_factors, finval_val) =
+            let (mut local_factors, finval) =
                 factorise_fast(poly_val.clone(), factor_base_list);
-            *finval = finval_val;
             local_factors = &local_factors ^ &poly_state.afact;
 
             // Handle large primes and partial relations
-            if *finval != 1 {
-                if *finval < large_prime_bound {
+            if finval != 1 {
+                if finval < qs_state.large_prime_bound {
                     let value_u64 = finval.to_u64().unwrap();
-                    if let Some((rel, lf, pv)) = partials.get(&value_u64) {
+                    if let Some((rel, lf, pv)) = qs_state.partials.get(&value_u64) {
                         relation.assign(rel);
                         local_factors = &local_factors ^ lf;
                         pva.assign(pv);
-                        *lp_found += 1;
+                        qs_state.lp_found += 1;
                     } else {
-                        partials.insert(
+                        qs_state.partials.insert(
                             value_u64,
                             (relation.clone(), local_factors.clone(), pva.clone()),
                         );
@@ -771,17 +803,17 @@ fn find_relations(
             // Update the matrix with exponents
             for fac in &local_factors {
                 if let Some(&idx) = factor_base.get(fac) {
-                    matrix[idx] |= ind.clone();
+                    qs_state.matrix[idx] |= qs_state.ind.clone();
                 }
             }
 
             // Update relations and roots
-            *ind <<= 1;
-            relations.push(relation.clone());
-            roots.push(pva.clone());
+            qs_state.ind <<= 1;
+            qs_state.relations.push(relation.clone());
+            qs_state.roots.push(pva.clone());
 
             // Check if target relations are met
-            if relations.len() >= qs_state.b as usize + qs_state.t as usize {
+            if qs_state.relations.len() >= qs_state.b as usize + qs_state.t as usize {
                 break;
             }
         }
@@ -791,17 +823,16 @@ fn find_relations(
 
 #[inline(never)]
 fn interval_sieve(
-    qs_state: &QsState,
-    current_factor_base: &[u32],
-    sieve_values: &mut [u8],
-    bainv: &mut [Vec<i32>],
-    soln_map: &mut [(i32, i32)],
+    qs_state: &mut QsState,
     v: usize,
     e: i32,
     interval_size: usize,
 ) {
-    
-    for &p in current_factor_base {
+
+    let sieve_values = &mut qs_state.sieve_values;
+    let bainv = &qs_state.bainv;
+    let soln_map = &mut qs_state.soln_map;
+    for &p in &qs_state.current_factor_base {
         let p_ind = p as usize;
         let p_i32 = p as i32;
         let log_p = qs_state.prime_log_map[p_ind];
@@ -826,17 +857,13 @@ fn interval_sieve(
             sieve_values[r1] += log_p;
         }
     }
+
 }
 
 fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
 /* -> (Vec<Integer>, Vec<Integer>, Vec<Integer>)*/
 {
     let start = Instant::now();
-
-    let n = qs_state.n.clone();
-    let b = qs_state.b;
-    let m = qs_state.m;
-    let eps = qs_state.eps;
 
     // Factor base stuff
     let fb_len = factor_base.len() as u32;
@@ -846,77 +873,46 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
         .map(|(i, val)| (*val, i))
         .collect();
     let target_relations = (fb_len + qs_state.t) as usize;
-    let large_prime_bound: u64 = (b * qs_state.lp_multiplier).into();
+    qs_state.large_prime_bound = qs_state.b * qs_state.lp_multiplier;
 
     // threshold and misc.
 
-    let threshold = ((Float::with_val(53, &n).sqrt() * m).log2() - eps)
+    let threshold = ((Float::with_val(53, &qs_state.n).sqrt() * qs_state.m).log2() - qs_state.eps)
         .to_f64()
         .floor() as u8;
     let bound = 0x80 - threshold;
-    let mut lp_found = 0;
-    let mut ind = Integer::from(1);
 
     // storage for results and partials
-    let mut matrix = vec![Integer::new(); fb_len as usize];
-    let mut relations: Vec<Integer> = Vec::new();
-    let mut roots: Vec<Integer> = Vec::new();
-    let mut partials: FxHashMap<u64, (Integer, FxHashSet<i32>, Integer)> = FxHashMap::default();
+    qs_state.matrix = vec![Integer::new(); fb_len as usize];
 
     // polynomial controls
     let mut num_poly = 0;
-    let interval_size: usize = (2 * m + 1) as usize;
+    let interval_size: usize = (2 * qs_state.m + 1) as usize;
     let grays = get_gray_code(20);
-    let mut poly_a_list: FxHashSet<Integer> = FxHashSet::default();
 
-    let mut sieve_values: Vec<u8> = vec![0x80 - threshold; interval_size];
+    qs_state.sieve_values = vec![0x80 - threshold; interval_size];
 
     let mut ft = true;
 
-    let mut bainv: Vec<Vec<i32>> = vec![vec![0; 30]; (b + 1) as usize];
-    let mut soln_map: Vec<(i32, i32)> = vec![(0, 0); (b + 1) as usize];
-
-    let filtered_factor_base: Vec<u32> = factor_base
-        .iter()
-        .filter(|&&p| p >= qs_state.prime_limit)
-        .map(|&p| p as u32)
-        .collect();
-
-    let mut current_factor_base: Vec<u32> = Vec::new();
-
-    let mut axval = Integer::new();
-    let mut relation = Integer::new();
-    let mut poly_val = Integer::new();
-    let mut pva = Integer::new();
-    let mut finval = Integer::new();
     let mut polynomials: Vec<Polynomial> = Vec::new();
 
-    while relations.len() < target_relations {
+    while qs_state.relations.len() < target_relations {
+        if num_poly % 10 == 0 {
+           print_stats(&qs_state.relations, target_relations, num_poly, start, ft, qs_state.lp_found);
+        }
+        ft = false;
+
+
         let poly_state = generate_polynomials(
             qs_state,
-            &n,
-            m,
-            &mut bainv,
-            &mut soln_map,
-            &factor_base,
-            &mut poly_a_list,
-            &filtered_factor_base,
-            &mut current_factor_base,
             &mut polynomials,
+            &factor_base,
             &grays,
         );
         for ppoly in &polynomials {
-            if num_poly % 1000 == 0 {
-                print_stats(&relations, target_relations, num_poly, start, ft, lp_found);
-            }
-            ft = false;
 
             interval_sieve(
                 qs_state,
-                &current_factor_base,
-                &mut sieve_values,
-                &mut bainv,
-                &mut soln_map,
                 ppoly.v,
                 ppoly.e,
                 interval_size,
@@ -925,31 +921,17 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
             find_relations(
                 qs_state,
                 &fb_map,
-                &sieve_values,
                 interval_size,
                 &poly_state,
                 ppoly,
                 &factor_base,
-                &mut partials,
-                &mut relations,
-                &mut roots,
-                &mut matrix,
-                &mut ind,
-                large_prime_bound,
-                &mut lp_found,
-                &mut axval,
-                &mut relation,
-                &mut poly_val,
-                &mut pva,
-                &mut finval,
-                &m,
             );
             num_poly += 1;
-            sieve_values.fill(bound);
+            qs_state.sieve_values.fill(bound);
         }
     }
-    println!("Large Primes Found: {lp_found}");
-    println!("Normal Relations Found: {}", relations.len() - lp_found)
+    println!("Large Primes Found: {}", qs_state.lp_found);
+    println!("Normal Relations Found: {}", qs_state.relations.len() - qs_state.lp_found)
 }
 fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
     //let original_n = qs_state.n.clone();
@@ -999,6 +981,21 @@ fn main() {
     let multiplier = 0;
     let prime_log_map: Vec<u8> = vec![0; (b + 1) as usize];
     let root_map = vec![(0, 0); (b + 1) as usize];
+    let lp_found = 0;
+    let large_prime_bound = 0;
+    let matrix: Vec<Integer> = Vec::new();
+    let relations: Vec<Integer> = Vec::new();
+    let roots: Vec<Integer> = Vec::new();
+    let partials: FxHashMap<u64, (Integer, FxHashSet<i32>, Integer)> = FxHashMap::default();
+    let ind = Integer::from(1);
+    let current_factor_base: Vec<u32> = Vec::new();
+    let sieve_values: Vec<u8> = Vec::new();
+    let bainv: Vec<Vec<i32>> = vec![vec![0; 30]; (b + 1) as usize];
+    let soln_map: Vec<(i32, i32)> = vec![(0, 0); (b + 1) as usize];
+    let poly_a_list: FxHashSet<Integer> = FxHashSet::default();
+    let filtered_factor_base: Vec<u32> = Vec::new();
+    let fb_primes: Vec<FBPrime> = Vec::new();
+    let current_fb_primes: Vec<FBPrime> = Vec::new();
     let mut qs_state = QsState {
         n,
         b,
@@ -1010,6 +1007,21 @@ fn main() {
         multiplier,
         prime_log_map,
         root_map,
+        lp_found,
+        large_prime_bound,
+        matrix,
+        relations,
+        roots,
+        partials,
+        ind,
+        current_factor_base,
+        sieve_values,
+        bainv,
+        soln_map,
+        poly_a_list,
+        filtered_factor_base,
+        fb_primes,
+        current_fb_primes,
     };
     factor(&mut qs_state);
 }
