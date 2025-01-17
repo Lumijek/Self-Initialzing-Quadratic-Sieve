@@ -40,14 +40,9 @@ struct QsState {
     poly_a_list: FxHashSet<Integer>,
     filtered_factor_base: Vec<u32>,
     fb_primes: Vec<FBPrime>,
-    current_fb_primes: Vec<FBPrime>
-}
+    current_fb_primes: Vec<FBPrime>,
 
-struct FBPrime {
-    prime: u32,
-    root1: u32,
-    root2: u32,
-    logprime: u8
+    b1: usize
 }
 
 struct Polynomial {
@@ -66,6 +61,12 @@ struct PolyState {
     afact: FxHashSet<i32>,
 }
 
+struct FBPrime {
+    p: u32,
+    root1: u32,
+    root2: u32,
+    logprime: u8 
+}
 const MULT_LIST: [u32; 114] = [
     1, 2, 3, 5, 7, 9, 10, 11, 13, 14, 15, 17, 19, 21, 23, 25, 29, 31, 33, 35, 37, 39, 41, 43, 45,
     47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69, 71, 73, 75, 77, 79, 83, 85, 87, 89, 91, 93, 95,
@@ -367,15 +368,6 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
             factor_base.push(*prime as i32);
             qs_state.prime_log_map[*prime as usize] = prime.ilog2() as u8;
             qs_state.root_map[*prime as usize] = tonelli_shanks(&qs_state.n, prime);
-            if *prime >= qs_state.prime_limit as u32 {
-                let fb_prime = FBPrime {
-                    prime: *prime,
-                    root1: qs_state.root_map[*prime as usize].0,
-                    root2: qs_state.root_map[*prime as usize].1,
-                    logprime: prime.ilog2() as u8
-                };
-                qs_state.fb_primes.push(fb_prime);
-            }
         }
     }
     qs_state.filtered_factor_base = factor_base
@@ -383,6 +375,8 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
         .filter(|&&p| p >= qs_state.prime_limit)
         .map(|&p| p as u32)
         .collect();
+
+
     println!("Factor base size: {}", factor_base.len());
     factor_base
 }
@@ -648,28 +642,20 @@ fn generate_polynomials(
 ) -> PolyState {
     let mut pa = Integer::new();
     qs_state.current_factor_base.clear();
-    qs_state.current_fb_primes.clear();
     polynomials.clear();
     let poly_state =
         generate_first_polynomial(qs_state, factor_base);
     let end = 1 << (poly_state.s - 1);
+
+    let mut found = false;
     for p in &qs_state.filtered_factor_base {
         pa.assign(&poly_state.a % p);
         if !pa.is_zero() {
             qs_state.current_factor_base.push(*p);
         }
-    }
-
-    for fb_prime in &qs_state.current_fb_primes {
-        pa.assign(&poly_state.a % fb_prime.prime);
-        if !pa.is_zero() {
-            let fbp = FBPrime {
-                prime: fb_prime.prime,
-                root1: fb_prime.root1,
-                root2: fb_prime.root2,
-                logprime: fb_prime.logprime
-            };
-            qs_state.fb_primes.push(fbp);
+        if !found && *p > (qs_state.m * 2 + 1) {
+            found = true;
+            qs_state.b1 = qs_state.current_factor_base.len() - 1;
         }
     }
 
@@ -832,7 +818,12 @@ fn interval_sieve(
     let sieve_values = &mut qs_state.sieve_values;
     let bainv = &qs_state.bainv;
     let soln_map = &mut qs_state.soln_map;
-    for &p in &qs_state.current_factor_base {
+
+    let cur_fb1 = &qs_state.current_factor_base[..qs_state.b1];
+    let cur_fb2 = &qs_state.current_factor_base[qs_state.b1..];
+
+
+    for &p in cur_fb1 {
         let p_ind = p as usize;
         let p_i32 = p as i32;
         let log_p = qs_state.prime_log_map[p_ind];
@@ -857,6 +848,30 @@ fn interval_sieve(
             sieve_values[r1] += log_p;
         }
     }
+
+    for &p in cur_fb2 {
+        let p_ind = p as usize;
+        let p_i32 = p as i32;
+        let log_p = qs_state.prime_log_map[p_ind];
+
+        let (r1, r2) = soln_map[p_ind];
+        let ebainv = e * bainv[p_ind][v];
+        soln_map[p_ind].0 = (r1 - ebainv).rem_euclid(p_i32);
+        soln_map[p_ind].1 = (r2 - ebainv).rem_euclid(p_i32);
+        let mut r1 = r1 as usize;
+        let mut r2 = r2 as usize;
+
+        if r1 > r2 {
+            std::mem::swap(&mut r1, &mut r2);
+        }
+        if r1 < interval_size {
+            sieve_values[r1] += log_p;
+            if r2 < interval_size {
+                sieve_values[r2] += log_p;
+            }
+        }
+    }
+
 
 }
 
@@ -996,6 +1011,7 @@ fn main() {
     let filtered_factor_base: Vec<u32> = Vec::new();
     let fb_primes: Vec<FBPrime> = Vec::new();
     let current_fb_primes: Vec<FBPrime> = Vec::new();
+
     let mut qs_state = QsState {
         n,
         b,
@@ -1022,6 +1038,8 @@ fn main() {
         filtered_factor_base,
         fb_primes,
         current_fb_primes,
+
+        b1: 0
     };
     factor(&mut qs_state);
 }
