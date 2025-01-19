@@ -1,4 +1,3 @@
-#![allow(unused_variables)]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use rand::{self, Rng};
@@ -826,12 +825,9 @@ fn interval_sieve(qs_state: &mut QsState, v: usize, e: i32, interval_size: usize
     }
 }
 
-fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
-/* -> (Vec<Integer>, Vec<Integer>, Vec<Integer>)*/
-{
+fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>) {
     let start = Instant::now();
 
-    // Factor base stuff
     let fb_len = factor_base.len() as u32;
     let fb_map: FxHashMap<_, _> = factor_base
         .iter()
@@ -841,17 +837,13 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
     let target_relations = (fb_len + qs_state.t) as usize;
     qs_state.large_prime_bound = qs_state.b * qs_state.lp_multiplier;
 
-    // threshold and misc.
-
     let threshold = ((Float::with_val(53, &qs_state.n).sqrt() * qs_state.m).log2() - qs_state.eps)
         .to_f64()
         .floor() as u8;
     let bound = 0x80 - threshold;
 
-    // storage for results and partials
     qs_state.matrix = vec![Integer::new(); fb_len as usize];
 
-    // polynomial controls
     let mut num_poly = 0;
     let interval_size: usize = (2 * qs_state.m + 1) as usize;
     let grays = get_gray_code(20);
@@ -863,19 +855,21 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
     let mut polynomials: Vec<Polynomial> = Vec::new();
 
     while qs_state.relations.len() < target_relations {
+        if num_poly % 10 == 0 {
+            print_stats(
+                &qs_state.relations,
+                target_relations,
+                num_poly,
+                start,
+                ft,
+                qs_state.lp_found,
+            );
+        }
+        ft = false;
+
         let poly_state = generate_polynomials(qs_state, &mut polynomials, &factor_base, &grays);
+
         for ppoly in &polynomials {
-            if num_poly % 500 == 0 {
-                print_stats(
-                    &qs_state.relations,
-                    target_relations,
-                    num_poly,
-                    start,
-                    ft,
-                    qs_state.lp_found,
-                );
-            }
-            ft = false;
             interval_sieve(qs_state, ppoly.v, ppoly.e, interval_size);
 
             find_relations(
@@ -1033,6 +1027,8 @@ fn factor(qs_state: &mut QsState) {
     } else {
         println!("No non-trivial factors found");
     }
+
+    println!("Total time: {end}");
 }
 
 fn main() {
