@@ -9,7 +9,3 @@ rug = "1.26.1"
 rand = "*"
 rustc-hash = "2.1.0"
 mimalloc = "*"
-rayon = "*"
-
-[profile.release]
-debug = true
