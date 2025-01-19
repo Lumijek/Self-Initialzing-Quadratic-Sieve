@@ -666,7 +666,7 @@ fn find_relations(
     let mut pva = Integer::new();
     let mut x: usize = 0;
     let mut i = 0;
-    let slice_u128: &[u64] = unsafe {
+    let slice: &[u64] = unsafe {
         assert!(
             (sieve_values.as_ptr() as usize) % mem::align_of::<u64>() == 0,
             "sieve_values is not properly aligned for u64"
@@ -678,21 +678,21 @@ fn find_relations(
         )
     };
 
-    let sieve_mask: u64 = 0x8080808080808080;
+    let sieve_mask: u64 = 0x8080808080808080; // possibly change this to a u128. sometimes faster sometimes slower
 
     while x < interval_size {
-        if i + 7 >= slice_u128.len() {
+        if i + 7 >= slice.len() {
             break;
         }
 
-        let to_mask = slice_u128[i]
-            | slice_u128[i + 1]
-            | slice_u128[i + 2]
-            | slice_u128[i + 3]
-            | slice_u128[i + 4]
-            | slice_u128[i + 5]
-            | slice_u128[i + 6]
-            | slice_u128[i + 7];
+        let to_mask = slice[i]
+            | slice[i + 1]
+            | slice[i + 2]
+            | slice[i + 3]
+            | slice[i + 4]
+            | slice[i + 5]
+            | slice[i + 6]
+            | slice[i + 7];
         if to_mask & sieve_mask == 0 {
             x += 64;
             i += 8;
