@@ -734,7 +734,7 @@ fn find_relations(
                     if qs_state.partials.contains_key(&value) {
                         let (rel, lf, pv) = &qs_state.partials[&value];
                         relation *= rel;
-                        local_factors = &local_factors ^ &lf;
+                        local_factors = &local_factors ^ lf;
                         pva *= pv;
                         qs_state.lp_found += 1;
                     } else {
@@ -985,7 +985,7 @@ fn extract_factors(
     (Integer::new(), Integer::new())
 }
 
-fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
+fn factor(qs_state: &mut QsState) {
     let original_n = qs_state.n.clone();
     let overall_start = Instant::now();
     println!("========== Self Initializing Quadratic Sieve Start ==========");
@@ -1033,13 +1033,6 @@ fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
     } else {
         println!("No non-trivial factors found");
     }
-
-    println!("Elapsed: {}", end);
-
-    (
-        "1000".parse::<Integer>().unwrap(),
-        "1000".parse::<Integer>().unwrap(),
-    )
 }
 
 fn main() {

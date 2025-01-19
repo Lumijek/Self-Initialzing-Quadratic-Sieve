@@ -42,3 +42,4 @@ Ugly interface which will be fixed later!
 - Implement Block Lanczos over GF(2) instead of Gaussian Elimination
 - Micro-optimizations to speed up factor extraction
 - Clean up code as it is a bit messy and also add comments
+- Parallel Processing for sieving
