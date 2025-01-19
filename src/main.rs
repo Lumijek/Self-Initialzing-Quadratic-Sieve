@@ -25,7 +25,6 @@ struct QsState {
     eps: u32,
     lp_multiplier: u32,
     multiplier: u32,
-    prime_log_map: Vec<u8>,
     root_map: Vec<(u32, u32)>,
     lp_found: usize,
     large_prime_bound: u32,
@@ -332,12 +331,10 @@ fn tonelli_shanks(a: &Integer, prime: &u32) -> (u32, u32) {
 
 fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
     let mut factor_base: Vec<i32> = vec![-1, 2];
-    qs_state.prime_log_map.insert(2, 1u8);
 
     for prime in &prime_list[1..] {
         if legendre(qs_state.n.clone(), *prime) == 1 {
             factor_base.push(*prime as i32);
-            qs_state.prime_log_map[*prime as usize] = prime.ilog2() as u8;
             qs_state.root_map[*prime as usize] = tonelli_shanks(&qs_state.n, prime);
             if *prime >= qs_state.prime_limit as u32 {
                 let fbp = FBPrime {
@@ -371,7 +368,6 @@ fn modinv(n: &Integer, mut p: i32) -> i32 {
     x
 }
 
-#[inline(never)]
 fn generate_a(
     qs_state: &mut QsState,
     factor_base: &[i32],
@@ -494,7 +490,6 @@ fn generate_a(
     (poly_a, qli, afact)
 }
 
-#[inline(never)]
 fn generate_first_polynomial(qs_state: &mut QsState, factor_base: &[i32]) -> PolyState {
     let (a, qli, afact) = generate_a(qs_state, factor_base);
     let bainv = &mut qs_state.bainv;
@@ -580,7 +575,6 @@ fn generate_first_polynomial(qs_state: &mut QsState, factor_base: &[i32]) -> Pol
     pstate
 }
 
-#[inline(never)]
 fn factorise_fast(mut value: Integer, factor_base: &[i32]) -> (FxHashSet<i32>, Integer) {
     let mut factors: FxHashSet<i32> = FxHashSet::default();
     if value < 0 {
@@ -602,7 +596,6 @@ fn factorise_fast(mut value: Integer, factor_base: &[i32]) -> (FxHashSet<i32>, I
     (factors, value)
 }
 
-#[inline(never)]
 fn generate_polynomials(
     qs_state: &mut QsState,
     polynomials: &mut Vec<Polynomial>,
@@ -658,7 +651,6 @@ fn generate_polynomials(
     poly_state
 }
 
-#[inline(never)]
 fn find_relations(
     qs_state: &mut QsState,
     fb_map: &FxHashMap<i32, usize>,
@@ -734,7 +726,6 @@ fn find_relations(
             let (mut local_factors, finval) = factorise_fast(poly_val.clone(), factor_base_list);
             local_factors = &local_factors ^ &poly_state.afact;
 
-
             // Handle large primes and partial relations
 
             if finval != 1 {
@@ -775,7 +766,6 @@ fn find_relations(
     }
 }
 
-#[inline(never)]
 fn interval_sieve(qs_state: &mut QsState, v: usize, e: i32, interval_size: usize) {
     let sieve_values = &mut qs_state.sieve_values;
     let bainv = &qs_state.bainv;
@@ -873,20 +863,19 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
     let mut polynomials: Vec<Polynomial> = Vec::new();
 
     while qs_state.relations.len() < target_relations {
-        if num_poly % 10 == 0 {
-            print_stats(
-                &qs_state.relations,
-                target_relations,
-                num_poly,
-                start,
-                ft,
-                qs_state.lp_found,
-            );
-        }
-        ft = false;
-
         let poly_state = generate_polynomials(qs_state, &mut polynomials, &factor_base, &grays);
         for ppoly in &polynomials {
+            if num_poly % 500 == 0 {
+                print_stats(
+                    &qs_state.relations,
+                    target_relations,
+                    num_poly,
+                    start,
+                    ft,
+                    qs_state.lp_found,
+                );
+            }
+            ft = false;
             interval_sieve(qs_state, ppoly.v, ppoly.e, interval_size);
 
             find_relations(
@@ -908,7 +897,6 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>)
     )
 }
 
-#[inline(never)]
 fn null_space_extraction(qs_state: &mut QsState) -> Vec<Integer> {
     let n = qs_state.relations.len();
     let m = qs_state.matrix.len();
@@ -964,10 +952,13 @@ fn null_space_extraction(qs_state: &mut QsState) -> Vec<Integer> {
         }
     }
     nulls
-
 }
 
-fn extract_factors(qs_state: &mut QsState, nulls: Vec<Integer>, original_n: Integer) {
+fn extract_factors(
+    qs_state: &mut QsState,
+    nulls: Vec<Integer>,
+    original_n: Integer,
+) -> (Integer, Integer) {
     let n = qs_state.relations.len();
     let mut bit = Integer::new();
     for mut vector in nulls {
@@ -988,12 +979,12 @@ fn extract_factors(qs_state: &mut QsState, nulls: Vec<Integer>, original_n: Inte
         let factor_candidate = original_n.clone().gcd(&gcd_input);
         if factor_candidate != 1 && factor_candidate != original_n {
             let other_factor = (&original_n / &factor_candidate).complete();
-            println!("Factors: {factor_candidate}, {other_factor}");
-            break;
+            return (factor_candidate, other_factor);
         }
-
     }
+    (Integer::new(), Integer::new())
 }
+
 fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
     let original_n = qs_state.n.clone();
     let overall_start = Instant::now();
@@ -1032,10 +1023,17 @@ fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
     println!("Step 4 (Null Space Extraction) took {} seconds", step_end);
 
     let step_start = Instant::now();
-    let nulls = extract_factors(qs_state, nulls, original_n);
+    let (a, b) = extract_factors(qs_state, nulls, original_n.clone());
     let step_end = step_start.elapsed().as_secs_f64();
-    println!("Step 4 (Extract Factors) took {} seconds", step_end);
+    println!("Step 5 (Extract Factors) took {} seconds", step_end);
     let end = overall_start.elapsed().as_secs_f64();
+
+    if a != 0 {
+        println!("Non-trivial factors found: {} = {} x {}", original_n, a, b);
+    } else {
+        println!("No non-trivial factors found");
+    }
+
     println!("Elapsed: {}", end);
 
     (
@@ -1045,26 +1043,16 @@ fn factor(qs_state: &mut QsState) -> (Integer, Integer) {
 }
 
 fn main() {
-    /*
-    let n = "4378791344783772102948750080621515168437665623852974929593741854971148718933";
+    let n = "7706819914707514618527375117609426832912695932717613757187193542710534314360539";
     let n = n.parse::<Integer>().unwrap();
-    let b: u32 = 270000;
-    let m: u32 = 90000;
+    let b: u32 = 450_000;
+    let m: u32 = 65536 * 3;
     let t: u32 = 64;
     let prime_limit: i32 = 220;
-    let eps: u32 = 49;
+    let eps: u32 = 50;
     let lp_multiplier: u32 = 150;
-    */
-    let n = "373784758862055327503642974151754627650123768832847679663987";
-    let n = n.parse::<Integer>().unwrap();
-    let b: u32 = 56311;
-    let m: u32 = 65536;
-    let t: u32 = 64;
-    let prime_limit: i32 = 127;
-    let eps: u32 = 39;
-    let lp_multiplier: u32 = 80;
-    let multiplier = 0;
-    let prime_log_map: Vec<u8> = vec![0; (b + 1) as usize];
+    let multiplier = 0; // leave at zero for automatic multiplier selection
+
     let root_map = vec![(0, 0); (b + 1) as usize];
     let lp_found = 0;
     let large_prime_bound = 0;
@@ -1074,7 +1062,7 @@ fn main() {
     let partials: FxHashMap<u64, (Integer, FxHashSet<i32>, Integer)> = FxHashMap::default();
     let ind = Integer::from(1);
     let sieve_values: Vec<u8> = Vec::new();
-    let bainv: Vec<Vec<i32>> = vec![vec![0; 30]; (b + 1) as usize];
+    let bainv: Vec<Vec<i32>> = vec![vec![0; 40]; (b + 1) as usize]; // 40 works for non huge numbers
     let poly_a_list: FxHashSet<Integer> = FxHashSet::default();
     let fb_primes: Vec<FBPrime> = Vec::new();
     let current_fb_primes: Vec<FBPrime> = Vec::new();
@@ -1088,7 +1076,6 @@ fn main() {
         eps,
         lp_multiplier,
         multiplier,
-        prime_log_map,
         root_map,
         lp_found,
         large_prime_bound,
