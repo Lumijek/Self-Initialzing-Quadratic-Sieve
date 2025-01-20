@@ -351,6 +351,7 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
     factor_base
 }
 
+#[inline(never)]
 fn modinv(n: &Integer, mut p: i32) -> i32 {
     let mut n = n.mod_u(p as u32) as i32;
     let mut x = 0;
@@ -367,6 +368,7 @@ fn modinv(n: &Integer, mut p: i32) -> i32 {
     x
 }
 
+#[inline(never)]
 fn generate_a(
     qs_state: &mut QsState,
     factor_base: &[i32],
@@ -489,6 +491,7 @@ fn generate_a(
     (poly_a, qli, afact)
 }
 
+#[inline(never)]
 fn generate_first_polynomial(qs_state: &mut QsState, factor_base: &[i32]) -> PolyState {
     let (a, qli, afact) = generate_a(qs_state, factor_base);
     let bainv = &mut qs_state.bainv;
@@ -574,6 +577,7 @@ fn generate_first_polynomial(qs_state: &mut QsState, factor_base: &[i32]) -> Pol
     pstate
 }
 
+#[inline(never)]
 fn factorise_fast(mut value: Integer, factor_base: &[i32]) -> (FxHashSet<i32>, Integer) {
     let mut factors: FxHashSet<i32> = FxHashSet::default();
     if value < 0 {
@@ -595,6 +599,7 @@ fn factorise_fast(mut value: Integer, factor_base: &[i32]) -> (FxHashSet<i32>, I
     (factors, value)
 }
 
+#[inline(never)]
 fn generate_polynomials(
     qs_state: &mut QsState,
     polynomials: &mut Vec<Polynomial>,
@@ -650,6 +655,7 @@ fn generate_polynomials(
     poly_state
 }
 
+#[inline(never)]
 fn find_relations(
     qs_state: &mut QsState,
     fb_map: &FxHashMap<i32, usize>,
@@ -702,7 +708,7 @@ fn find_relations(
             if xv >= sieve_values.len() {
                 break;
             }
-            if sieve_values[xv] & 0x80 == 0 {
+            if sieve_values[xv] < 0x80 {
                 continue;
             }
 
@@ -765,66 +771,70 @@ fn find_relations(
     }
 }
 
+#[inline(never)]
 fn interval_sieve(qs_state: &mut QsState, v: usize, e: i32, interval_size: usize) {
     let sieve_values = &mut qs_state.sieve_values;
     let bainv = &qs_state.bainv;
 
     let (cur_fb1, cur_fb2) = qs_state.current_fb_primes.split_at_mut(qs_state.b1);
 
-    for fbp in cur_fb1 {
-        let p = fbp.prime;
-        let p_ind = p as usize;
-        let p_i32 = p as i32;
+    unsafe {
+        for fbp in cur_fb1 {
+            let p = fbp.prime;
+            let p_ind = p as usize;
+            let p_i32 = p as i32;
 
-        let r1 = fbp.root1;
-        let r2 = fbp.root2;
-        let log_p = fbp.logprime;
-        let ebainv = e * bainv[p_ind][v];
-        fbp.root1 = (r1 - ebainv).rem_euclid(p_i32);
-        fbp.root2 = (r2 - ebainv).rem_euclid(p_i32);
-        let mut r1 = r1 as usize;
-        let mut r2 = r2 as usize;
+            let r1 = fbp.root1;
+            let r2 = fbp.root2;
+            let log_p = fbp.logprime;
+            let ebainv = e * bainv[p_ind][v];
+            fbp.root1 = (r1 - ebainv).rem_euclid(p_i32);
+            fbp.root2 = (r2 - ebainv).rem_euclid(p_i32);
+            let mut r1 = r1 as usize;
+            let mut r2 = r2 as usize;
 
-        if r1 > r2 {
-            std::mem::swap(&mut r1, &mut r2);
+            if r1 > r2 {
+                std::mem::swap(&mut r1, &mut r2);
+            }
+            while r2 < interval_size {
+                *sieve_values.get_unchecked_mut(r1) += log_p;
+                *sieve_values.get_unchecked_mut(r2) += log_p;
+                r1 += p_ind;
+                r2 += p_ind;
+            }
+            if r1 < interval_size {
+                *sieve_values.get_unchecked_mut(r1) += log_p;
+            }
         }
-        while r2 < interval_size {
-            sieve_values[r1] += log_p;
-            sieve_values[r2] += log_p;
-            r1 += p_ind;
-            r2 += p_ind;
-        }
-        if r1 < interval_size {
-            sieve_values[r1] += log_p;
-        }
-    }
 
-    for fbp in cur_fb2 {
-        let p = fbp.prime;
-        let p_ind = p as usize;
-        let p_i32 = p as i32;
+        for fbp in cur_fb2 {
+            let p = fbp.prime;
+            let p_ind = p as usize;
+            let p_i32 = p as i32;
 
-        let r1 = fbp.root1;
-        let r2 = fbp.root2;
-        let ebainv = e * bainv[p_ind][v];
-        let log_p = fbp.logprime;
-        fbp.root1 = (r1 - ebainv).rem_euclid(p_i32);
-        fbp.root2 = (r2 - ebainv).rem_euclid(p_i32);
-        let mut r1 = r1 as usize;
-        let mut r2 = r2 as usize;
+            let r1 = fbp.root1;
+            let r2 = fbp.root2;
+            let ebainv = e * bainv[p_ind][v];
+            let log_p = fbp.logprime;
+            fbp.root1 = (r1 - ebainv).rem_euclid(p_i32);
+            fbp.root2 = (r2 - ebainv).rem_euclid(p_i32);
+            let mut r1 = r1 as usize;
+            let mut r2 = r2 as usize;
 
-        if r1 > r2 {
-            std::mem::swap(&mut r1, &mut r2);
-        }
-        if r1 < interval_size {
-            sieve_values[r1] += log_p;
-            if r2 < interval_size {
-                sieve_values[r2] += log_p;
+            if r1 > r2 {
+                std::mem::swap(&mut r1, &mut r2);
+            }
+            if r1 < interval_size {
+                *sieve_values.get_unchecked_mut(r1) += log_p;
+                if r2 < interval_size {
+                    *sieve_values.get_unchecked_mut(r2) += log_p;
+                }
             }
         }
     }
 }
 
+#[inline(never)]
 fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>) {
     let start = Instant::now();
 
@@ -891,6 +901,7 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>) {
     )
 }
 
+#[inline(never)]
 fn null_space_extraction(qs_state: &mut QsState) -> Vec<Integer> {
     let n = qs_state.relations.len();
     let m = qs_state.matrix.len();
@@ -948,6 +959,7 @@ fn null_space_extraction(qs_state: &mut QsState) -> Vec<Integer> {
     nulls
 }
 
+#[inline(never)]
 fn extract_factors(
     qs_state: &mut QsState,
     nulls: Vec<Integer>,
@@ -979,6 +991,7 @@ fn extract_factors(
     (Integer::new(), Integer::new())
 }
 
+#[inline(never)]
 fn factor(qs_state: &mut QsState) {
     let original_n = qs_state.n.clone();
     let overall_start = Instant::now();
@@ -1032,6 +1045,24 @@ fn factor(qs_state: &mut QsState) {
 }
 
 fn main() {
+    let n = "4378791344783772102948750080621515168437665623852974929593741854971148718933";
+    let n = n.parse::<Integer>().unwrap();
+    let b: u32 = 270000;
+    let m: u32 = 65536;
+    let t: u32 = 64;
+    let prime_limit: i32 = 220;
+    let eps: u32 = 49;
+    let lp_multiplier: u32 = 150;
+    /*
+    let n = "373784758862055327503642974151754627650123768832847679663987";
+    let n = n.parse::<Integer>().unwrap();
+    let b: u32 = 60000;
+    let m: u32 = 65536;
+    let t: u32 = 64;
+    let prime_limit: i32 = 127;
+    let eps: u32 = 39;
+    let lp_multiplier: u32 = 80;
+
     let n = "7706819914707514618527375117609426832912695932717613757187193542710534314360539";
     let n = n.parse::<Integer>().unwrap();
     let b: u32 = 450_000;
@@ -1040,6 +1071,8 @@ fn main() {
     let prime_limit: i32 = 220;
     let eps: u32 = 50;
     let lp_multiplier: u32 = 150;
+    */
+
     let multiplier = 0; // leave at zero for automatic multiplier selection
 
     let root_map = vec![(0, 0); (b + 1) as usize];
