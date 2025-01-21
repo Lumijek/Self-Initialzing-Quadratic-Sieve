@@ -103,7 +103,7 @@ pub fn print_stats(
     first_time: bool,
     lp_found: usize,
 ) {
-    const LINES_TO_MOVE_UP: usize = 12;
+    const LINES_TO_MOVE_UP: usize = 13;
 
     if !first_time {
         print!("\x1B[{}A\x1B[J", LINES_TO_MOVE_UP);
@@ -111,6 +111,7 @@ pub fn print_stats(
     }
 
     let rel_len = relations.len() as f64;
+    let non_lp_rel_len = (relations.len() - lp_found) as f64;
     let num_poly_f64 = num_poly as f64;
     let elapsed = start_time.elapsed().as_secs_f64();
 
@@ -118,7 +119,9 @@ pub fn print_stats(
     let relations_per_second = rel_len / elapsed;
     let poly_per_second = num_poly_f64 / elapsed;
     let percent = (rel_len / target_relations as f64) * 100.0;
+    let non_lp_percent = (non_lp_rel_len / target_relations as f64) * 100.0;
     let percent_per_second = percent / elapsed;
+    let non_lp_percent_per_second = non_lp_percent / elapsed;
     let total_remaining_secs = ((100.0 - percent) / percent_per_second) as u64;
     let hours = total_remaining_secs / 3600;
     let minutes = (total_remaining_secs % 3600) / 60;
@@ -127,15 +130,16 @@ pub fn print_stats(
         "\
 Processing Status
 ----------------------------------------------
-Total Relations          : {}    
-Total Partial Relations  : {}    
-Total Polynomials Used   : {}    
-Relations per polynomial : {:.5} 
-Relations per second     : {:.2} 
-Poly per second          : {:.2} 
-Percent                  : {:.5}%
-Percent per second       : {:.5}%
-Estimated Time           : {}:{:02}:{:02}
+Total Relations            : {}    
+Total Partial Relations    : {}    
+Total Polynomials Used     : {}    
+Relations per polynomial   : {:.5} 
+Relations per second       : {:.2} 
+Poly per second            : {:.2} 
+Percent                    : {:.5}%
+Percent per second         : {:.5}%
+Percent per second (no LP) : {:.5}%
+Estimated Time             : {}:{:02}:{:02}
 ----------------------------------------------",
         relations.len(),
         lp_found,
@@ -145,6 +149,7 @@ Estimated Time           : {}:{:02}:{:02}
         poly_per_second,
         percent,
         percent_per_second,
+        non_lp_percent_per_second,
         hours,
         minutes,
         seconds
@@ -328,7 +333,7 @@ fn tonelli_shanks(a: &Integer, prime: &u32) -> (u32, u32) {
     (x, p_u32 - x)
 }
 
-fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
+fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> (Vec<i32>, Vec<u32>, Vec<u64>, Vec<u128>) {
     let mut factor_base: Vec<i32> = vec![-1, 2];
 
     for prime in &prime_list[1..] {
@@ -346,9 +351,12 @@ fn build_factor_base(qs_state: &mut QsState, prime_list: Vec<u32>) -> Vec<i32> {
             }
         }
     }
+    let factor_base_u128: Vec<u128> = factor_base.iter().skip(1).map(|&e| e as u128).collect();
+    let factor_base_u64: Vec<u64> = factor_base.iter().skip(1).map(|&e| e as u64).collect();
+    let factor_base_u32: Vec<u32> = factor_base.iter().skip(1).map(|&e| e as u32).collect();
 
     println!("Factor base size: {}", factor_base.len());
-    factor_base
+    (factor_base, factor_base_u32, factor_base_u64, factor_base_u128)
 }
 
 #[inline(never)]
@@ -578,26 +586,83 @@ fn generate_first_polynomial(qs_state: &mut QsState, factor_base: &[i32]) -> Pol
 }
 
 #[inline(never)]
-fn factorise_fast(mut value: Integer, factor_base: &[i32]) -> (FxHashSet<i32>, Integer) {
+fn factorise_fast(mut value: Integer, factor_base_u32: &[u32], factor_base_u64: &[u64], factor_base_u128: &[u128]) -> (FxHashSet<i32>, Integer) {
     let mut factors: FxHashSet<i32> = FxHashSet::default();
+    
     if value < 0 {
         factors.insert(-1);
         value = -value;
     }
 
-    for factor in factor_base.iter().skip(1) {
-        while value.is_divisible_u(*factor as u32) {
-            if !factors.contains(factor) {
-                factors.insert(*factor);
+    let mut i = 0;
+    let comp = Integer::from(u128::MAX);
+    
+    while i < factor_base_u32.len() {
+        let factor = factor_base_u32[i];
+        
+        while value.is_divisible_u(factor) {
+            if !factors.contains(&(factor as i32)) {
+                factors.insert(factor as i32);
             } else {
-                factors.remove(factor);
+                factors.remove(&(factor as i32));
             }
             value /= factor;
         }
+        
+        i += 1;
+        if value < comp {
+            break;
+        }
+    }
+    
+    if i == factor_base_u128.len() {
+        return (factors, value);
+    }
+    
+    let mut val_u128 = value.to_u128().unwrap();
+    
+    while i < factor_base_u128.len() {
+        let factor = factor_base_u128[i];
+        
+        while val_u128 % (factor) == 0 {
+            if !factors.contains(&(factor as i32)) {
+                factors.insert(factor as i32);
+            } else {
+                factors.remove(&(factor as i32));
+            }
+            val_u128 /= factor;
+        }
+        
+        i += 1;
+        if val_u128 < u64::MAX as u128 {
+            break;
+        }
     }
 
-    (factors, value)
+    if i == factor_base_u128.len() {
+        return (factors, Integer::from(val_u128));
+    }
+    
+    let mut val_u64 = val_u128 as u64;
+
+    while i < factor_base_u64.len() {
+        let factor = factor_base_u64[i];
+        
+        while val_u64 % (factor) == 0 {
+            if !factors.contains(&(factor as i32)) {
+                factors.insert(factor as i32);
+            } else {
+                factors.remove(&(factor as i32));
+            }
+            val_u64 /= factor;
+        }
+        
+        i += 1;
+    }
+
+    (factors, Integer::from(val_u64))
 }
+
 
 #[inline(never)]
 fn generate_polynomials(
@@ -662,7 +727,9 @@ fn find_relations(
     interval_size: usize,
     poly_state: &PolyState,
     ppoly: &Polynomial,
-    factor_base_list: &[i32],
+    factor_base_u32: &[u32],
+    factor_base_u64: &[u64],
+    factor_base_u128: &[u128],
 ) {
     let sieve_values = &qs_state.sieve_values;
     let mut axval = Integer::new();
@@ -728,7 +795,7 @@ fn find_relations(
             pva *= &ppoly.a;
 
             // Factorize the polynomial value
-            let (mut local_factors, finval) = factorise_fast(poly_val.clone(), factor_base_list);
+            let (mut local_factors, finval) = factorise_fast(poly_val.clone(), factor_base_u32, factor_base_u64, factor_base_u128);
             local_factors = &local_factors ^ &poly_state.afact;
 
             // Handle large primes and partial relations
@@ -787,7 +854,8 @@ fn interval_sieve(qs_state: &mut QsState, v: usize, e: i32, interval_size: usize
             let r1 = fbp.root1;
             let r2 = fbp.root2;
             let log_p = fbp.logprime;
-            let ebainv = e * bainv[p_ind][v];
+            let bainv_ptr = bainv.get_unchecked(p_ind).as_ptr();
+            let ebainv = *bainv_ptr.add(v) * e;
             fbp.root1 = (r1 - ebainv).rem_euclid(p_i32);
             fbp.root2 = (r2 - ebainv).rem_euclid(p_i32);
             let mut r1 = r1 as usize;
@@ -814,8 +882,9 @@ fn interval_sieve(qs_state: &mut QsState, v: usize, e: i32, interval_size: usize
 
             let r1 = fbp.root1;
             let r2 = fbp.root2;
-            let ebainv = e * bainv[p_ind][v];
             let log_p = fbp.logprime;
+            let bainv_ptr = bainv.get_unchecked(p_ind).as_ptr();
+            let ebainv = *bainv_ptr.add(v) * e;
             fbp.root1 = (r1 - ebainv).rem_euclid(p_i32);
             fbp.root2 = (r2 - ebainv).rem_euclid(p_i32);
             let mut r1 = r1 as usize;
@@ -835,7 +904,7 @@ fn interval_sieve(qs_state: &mut QsState, v: usize, e: i32, interval_size: usize
 }
 
 #[inline(never)]
-fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>) {
+fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>, factor_base_u32: Vec<u32>, factor_base_u64: Vec<u64>, factor_base_u128: Vec<u128>) {
     let start = Instant::now();
 
     let fb_len = factor_base.len() as u32;
@@ -888,7 +957,9 @@ fn sieve(qs_state: &mut QsState, factor_base: Vec<i32>) {
                 interval_size,
                 &poly_state,
                 ppoly,
-                &factor_base,
+                &factor_base_u32,
+                &factor_base_u64,
+                &factor_base_u128
             );
             num_poly += 1;
             qs_state.sieve_values.fill(bound);
@@ -1015,12 +1086,12 @@ fn factor(qs_state: &mut QsState) {
     qs_state.n = (&qs_state.n * qs_state.multiplier).complete();
 
     let step_start = Instant::now();
-    let factor_base = build_factor_base(qs_state, prime_list);
+    let (factor_base, factor_base_u32, factor_base_u64, factor_base_u128) = build_factor_base(qs_state, prime_list);
     let step_end = step_start.elapsed().as_secs_f64();
     println!("Step 3 (Build Factor Base) took {} seconds", step_end);
 
     let step_start = Instant::now();
-    sieve(qs_state, factor_base);
+    sieve(qs_state, factor_base, factor_base_u32, factor_base_u64, factor_base_u128);
     let step_end = step_start.elapsed().as_secs_f64();
     println!("Step 3 (Sieving) took {} seconds", step_end);
 
@@ -1051,7 +1122,7 @@ fn main() {
     let m: u32 = 65536;
     let t: u32 = 64;
     let prime_limit: i32 = 220;
-    let eps: u32 = 49;
+    let eps: u32 = 51;
     let lp_multiplier: u32 = 150;
     /*
     let n = "373784758862055327503642974151754627650123768832847679663987";
@@ -1060,7 +1131,7 @@ fn main() {
     let m: u32 = 65536;
     let t: u32 = 64;
     let prime_limit: i32 = 127;
-    let eps: u32 = 39;
+    let eps: u32 = 41;
     let lp_multiplier: u32 = 80;
 
     let n = "7706819914707514618527375117609426832912695932717613757187193542710534314360539";
