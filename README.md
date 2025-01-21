@@ -13,7 +13,7 @@ Implementation of the Quadratic Sieve includes :
 - Logarithms for sieving alongside the `0x80` trick
 
 ## Examples
-Currently don't have automatic parameter adjustment however I have found that carefully tuning parameters should get you to about 98% as fast as msieve for the sieving portion (for numbers < 85 digits[No Double Prime Variation :( ]) however lack of Block Lanczos implementation causes overall factorizations to be slower for numbers over 50ish digits.
+Currently don't have automatic parameter adjustment however I have found that carefully tuning parameters should get you to about 80% as fast as msieve for the sieving portion (for numbers < 85 digits[No Double Prime Variation :( ]) however lack of Block Lanczos implementation causes overall factorizations to be slower for numbers over 50ish digits.
 
 ```rust
 let n = "7706819914707514618527375117609426832912695932717613757187193542710534314360539";
